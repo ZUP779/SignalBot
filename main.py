@@ -98,10 +98,22 @@ def monitor_stocks():
 
 def add_stock_command(code: str, name: str = ""):
     """添加股票命令"""
+    print(f"🔍 正在添加股票: {code}")
+    if not name:
+        print("📡 正在自动获取股票名称...")
+    
     manager = StockManager()
     success = manager.add_stock(code, name)
+    
     if success:
-        print(f"✅ 成功添加股票: {code} {name}")
+        # 获取添加后的股票信息以显示完整信息
+        stocks = manager.list_stocks()
+        added_stock = next((s for s in stocks if s['code'] == code), None)
+        if added_stock:
+            display_name = added_stock['name'] if added_stock['name'] != '未知' else '(未获取到名称)'
+            print(f"✅ 成功添加股票: {code} {display_name} [{added_stock['market']}]")
+        else:
+            print(f"✅ 成功添加股票: {code}")
     else:
         print(f"❌ 添加股票失败: {code}")
 
@@ -129,6 +141,30 @@ def list_stocks_command():
     for stock in stocks:
         status = "✅" if stock['is_active'] else "❌"
         print(f"{status} {stock['code']} | {stock['name']} | {stock['market']} | {stock['added_time']}")
+
+def update_stock_names_command():
+    """更新所有股票名称"""
+    print("🔄 正在更新所有股票名称...")
+    manager = StockManager()
+    stocks = manager.list_stocks()
+    
+    updated_count = 0
+    for stock in stocks:
+        if stock['is_active'] and (not stock['name'] or stock['name'] == '未知'):
+            print(f"📡 正在获取 {stock['code']} 的名称...")
+            fetcher = StockFetcher()
+            name = fetcher.get_stock_name(stock['code'])
+            if name:
+                success = manager.update_stock_info(stock['code'], name)
+                if success:
+                    print(f"✅ 更新成功: {stock['code']} -> {name}")
+                    updated_count += 1
+                else:
+                    print(f"❌ 更新失败: {stock['code']}")
+            else:
+                print(f"⚠️  无法获取 {stock['code']} 的名称")
+    
+    print(f"🎉 更新完成，共更新了 {updated_count} 只股票的名称")
 
 def test_notification():
     """测试通知"""
@@ -181,6 +217,9 @@ def main():
     # 列出股票
     subparsers.add_parser('list', help='列出所有股票')
     
+    # 更新股票名称
+    subparsers.add_parser('update-names', help='更新所有股票名称')
+    
     # 测试通知
     subparsers.add_parser('test', help='测试企业微信通知')
     
@@ -198,6 +237,8 @@ def main():
         remove_stock_command(args.code)
     elif args.command == 'list':
         list_stocks_command()
+    elif args.command == 'update-names':
+        update_stock_names_command()
     elif args.command == 'test':
         test_notification()
     elif args.command == 'run':

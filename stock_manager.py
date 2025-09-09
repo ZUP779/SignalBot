@@ -2,6 +2,7 @@ import sqlite3
 import logging
 from typing import List, Optional
 from config import DATABASE_PATH
+from stock_fetcher import StockFetcher
 
 class StockManager:
     """股票代码管理器"""
@@ -9,6 +10,7 @@ class StockManager:
     def __init__(self):
         self.db_path = DATABASE_PATH
         self.logger = logging.getLogger(__name__)
+        self.stock_fetcher = StockFetcher()
         self._init_database()
     
     def _init_database(self):
@@ -50,7 +52,7 @@ class StockManager:
         添加股票代码
         Args:
             code: 股票代码
-            name: 股票名称（可选）
+            name: 股票名称（可选，如果为空则自动获取）
             market: 市场类型（可选）
         Returns:
             添加是否成功
@@ -59,6 +61,17 @@ class StockManager:
             # 自动判断市场类型
             if not market:
                 market = "港股" if len(code) == 5 and code.isdigit() else "A股"
+            
+            # 如果没有提供股票名称，尝试自动获取
+            if not name:
+                self.logger.info(f"正在自动获取股票 {code} 的名称...")
+                fetched_name = self.stock_fetcher.get_stock_name(code)
+                if fetched_name:
+                    name = fetched_name
+                    self.logger.info(f"成功获取股票名称: {code} -> {name}")
+                else:
+                    self.logger.warning(f"无法获取股票 {code} 的名称，将使用空名称")
+                    name = ""
             
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
