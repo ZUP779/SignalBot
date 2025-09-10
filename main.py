@@ -8,6 +8,7 @@ from stock_fetcher import StockFetcher
 from wechat_notifier import WeChatNotifier
 from stock_manager import StockManager
 from signal_detector import SignalDetector
+from stock_screener import StockScreener, ScreenerCriteria
 from config import LOG_LEVEL, LOG_FILE, UPDATE_INTERVAL_HOURS, ALWAYS_SEND_REPORT, SEND_SIGNAL_ALERTS
 
 def setup_logging():
@@ -180,6 +181,120 @@ def run_once():
     print("🚀 立即执行股票监控...")
     monitor_stocks()
 
+def screen_stocks_command(market: str = "A股", top_n: int = 10):
+    """智能筛选股票命令"""
+    print(f"🎯 开始智能筛选{market}优质股票...")
+    
+    try:
+        screener = StockScreener()
+        results = screener.get_recommended_stocks(market, top_n)
+        
+        if not results:
+            print("❌ 未找到符合条件的股票")
+            return
+        
+        print(f"\n📊 智能筛选结果 (共{len(results)}只股票):")
+        print("=" * 80)
+        
+        for i, result in enumerate(results, 1):
+            print(f"\n{i}. {result.name}({result.code})")
+            print(f"   📊 综合评分: {result.score:.1f}/100")
+            print(f"   🎯 投资建议: {result.recommendation}")
+            print(f"   ⚠️  风险等级: {result.risk_level}")
+            print(f"   ✅ 符合条件: {', '.join(result.criteria_met[:3])}")
+            print(f"   💡 推荐理由: {result.reason}")
+        
+        print("\n" + "=" * 80)
+        print("⚠️ 以上分析仅供参考，投资有风险，决策需谨慎！")
+        
+        # 询问是否添加到监控列表
+        if results:
+            print(f"\n💡 发现 {len(results)} 只优质股票，是否添加到监控列表？")
+            choice = input("输入要添加的股票序号(用逗号分隔，如1,3,5)，或按回车跳过: ").strip()
+            
+            if choice:
+                try:
+                    indices = [int(x.strip()) - 1 for x in choice.split(',')]
+                    manager = StockManager()
+                    added_count = 0
+                    
+                    for idx in indices:
+                        if 0 <= idx < len(results):
+                            result = results[idx]
+                            success = manager.add_stock(result.code, result.name)
+                            if success:
+                                print(f"✅ 已添加: {result.name}({result.code})")
+                                added_count += 1
+                            else:
+                                print(f"❌ 添加失败: {result.name}({result.code})")
+                    
+                    print(f"\n🎉 成功添加 {added_count} 只股票到监控列表")
+                except ValueError:
+                    print("❌ 输入格式错误")
+        
+    except Exception as e:
+        print(f"❌ 股票筛选失败: {e}")
+
+def analyze_stock_command(code: str):
+    """分析单只股票命令"""
+    print(f"🔍 正在分析股票: {code}")
+    
+    try:
+        screener = StockScreener()
+        
+        # 获取股票基础数据
+        basic_data = screener._get_basic_data(code)
+        if not basic_data:
+            print(f"❌ 无法获取股票 {code} 的数据")
+            return
+        
+        # 获取技术指标数据
+        technical_data = screener._get_technical_data(code)
+        
+        # 评估股票
+        criteria = list(ScreenerCriteria)
+        result = screener._evaluate_stock(code, criteria)
+        
+        if not result:
+            print(f"❌ 无法分析股票 {code}")
+            return
+        
+        print(f"\n📊 {result.name}({result.code}) 详细分析报告")
+        print("=" * 60)
+        
+        # 基本信息
+        print(f"💰 当前价格: {basic_data.get('currency', '¥')}{basic_data.get('current_price', 0):.2f}")
+        print(f"📈 涨跌幅: {basic_data.get('change_percent', 0):+.2f}%")
+        print(f"📊 成交量: {basic_data.get('volume', 0):,}")
+        print(f"🏢 市场: {basic_data.get('market', '未知')}")
+        
+        # 评估结果
+        print(f"\n🎯 综合评分: {result.score:.1f}/100")
+        print(f"📋 投资建议: {result.recommendation}")
+        print(f"⚠️ 风险等级: {result.risk_level}")
+        print(f"💡 推荐理由: {result.reason}")
+        
+        # 符合的筛选条件
+        if result.criteria_met:
+            print(f"\n✅ 符合筛选条件:")
+            for criterion in result.criteria_met:
+                print(f"   • {criterion}")
+        
+        # 技术指标
+        if technical_data:
+            print(f"\n📊 技术指标:")
+            print(f"   RSI: {technical_data.get('rsi', 0):.1f}")
+            print(f"   MACD: {'看涨' if technical_data.get('macd_signal', 0) > 0 else '看跌'}")
+            print(f"   MA5: {technical_data.get('ma5', 0):.2f}")
+            print(f"   MA20: {technical_data.get('ma20', 0):.2f}")
+            print(f"   量比: {technical_data.get('volume_ratio', 0):.1f}")
+        
+        print("\n" + "=" * 60)
+        print("⚠️ 以上分析仅供参考，投资有风险，决策需谨慎！")
+        
+    except Exception as e:
+        print(f"❌ 分析股票失败: {e}")
+
 def start_scheduler():
     """启动定时任务"""
     logger = logging.getLogger(__name__)
@@ -229,6 +344,15 @@ def main():
     # 启动定时任务
     subparsers.add_parser('start', help='启动定时监控')
     
+    # 智能筛选股票
+    screen_parser = subparsers.add_parser('screen', help='智能筛选优质股票')
+    screen_parser.add_argument('--market', default='A股', choices=['A股', '港股'], help='市场类型')
+    screen_parser.add_argument('--top', type=int, default=10, help='显示前N只股票')
+    
+    # 分析单只股票
+    analyze_parser = subparsers.add_parser('analyze', help='分析单只股票')
+    analyze_parser.add_argument('code', help='股票代码')
+    
     args = parser.parse_args()
     
     if args.command == 'add':
@@ -245,6 +369,10 @@ def main():
         run_once()
     elif args.command == 'start':
         start_scheduler()
+    elif args.command == 'screen':
+        screen_stocks_command(args.market, args.top)
+    elif args.command == 'analyze':
+        analyze_stock_command(args.code)
     else:
         parser.print_help()
 
