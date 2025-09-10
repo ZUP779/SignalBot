@@ -20,6 +20,9 @@ UPDATE_INTERVAL_HOURS = 1
 ALWAYS_SEND_REPORT = os.getenv('ALWAYS_SEND_REPORT', 'true').lower() == 'true'
 SEND_SIGNAL_ALERTS = os.getenv('SEND_SIGNAL_ALERTS', 'true').lower() == 'true'
 
+# 开市时间检查配置
+CHECK_MARKET_HOURS = os.getenv('CHECK_MARKET_HOURS', 'true').lower() == 'true'
+
 # 信号检测配置
 PRICE_CHANGE_THRESHOLD = float(os.getenv('PRICE_CHANGE_THRESHOLD', '5.0'))
 VOLUME_SPIKE_THRESHOLD = float(os.getenv('VOLUME_SPIKE_THRESHOLD', '2.0'))

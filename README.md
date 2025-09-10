@@ -71,6 +71,7 @@ SignalBot 会智能检测价格异动、成交量异常等信号，只在发现�
 | `add` | 添加股票代码 | `python main.py add 000001 --name "平安银行"` |
 | `remove` | 移除股票代码 | `python main.py remove 000001` |
 | `list` | 列出所有股票 | `python main.py list` |
+| `status` | 查看市场开市状态 | `python main.py status` |
 | `test` | 测试企业微信通知 | `python main.py test` |
 | `run` | 立即执行监控 | `python main.py run` |
 | `start` | 启动定时监控 | `python main.py start` |
@@ -94,11 +95,21 @@ SignalBot 会智能检测价格异动、成交量异常等信号，只在发现�
 
 ## 配置文件
 
-主要配置在 `config.py` 中：
+主要配置在 `config.py` 和 `.env` 文件中：
 
+**基础配置**:
 - `UPDATE_INTERVAL_HOURS`: 更新频率（小时）
 - `DATABASE_PATH`: 数据库文件路径
 - `LOG_LEVEL`: 日志级别
+
+**推送策略配置**:
+- `ALWAYS_SEND_REPORT`: 是否始终发送股票数据报告
+- `SEND_SIGNAL_ALERTS`: 是否发送信号预警
+- `CHECK_MARKET_HOURS`: 是否只在开市时间推送消息
+
+**信号检测配置**:
+- `PRICE_CHANGE_THRESHOLD`: 价格变动阈值(%)
+- `VOLUME_SPIKE_THRESHOLD`: 成交量异常倍数
 
 ## 企业微信设置
 
@@ -117,6 +128,13 @@ SignalBot 会智能检测价格异动、成交量异常等信号，只在发现�
 - 只在检测到重要信号时推送，避免信息过载
 - 支持信号级别分类（高/中/低）
 - 可配置推送阈值和条件
+- **开市时间智能检查** - 自动识别A股和港股开市时间，只在开市期间推送消息
+
+### 🕐 开市时间管理
+- **A股交易时间**: 周一至周五 09:30-11:30, 13:00-15:00 (北京时间)
+- **港股交易时间**: 周一至周五 09:30-12:00, 13:00-16:00 (香港时间)
+- **节假日识别**: 内置中国大陆和香港节假日日历
+- **智能过滤**: 休市时间自动跳过监控，避免无效推送
 
 ## 🏗️ 系统架构与设计
 

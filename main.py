@@ -9,7 +9,8 @@ from wechat_notifier import WeChatNotifier
 from stock_manager import StockManager
 from signal_detector import SignalDetector
 from stock_screener import StockScreener, ScreenerCriteria
-from config import LOG_LEVEL, LOG_FILE, UPDATE_INTERVAL_HOURS, ALWAYS_SEND_REPORT, SEND_SIGNAL_ALERTS
+from market_hours import MarketHours
+from config import LOG_LEVEL, LOG_FILE, UPDATE_INTERVAL_HOURS, ALWAYS_SEND_REPORT, SEND_SIGNAL_ALERTS, CHECK_MARKET_HOURS
 
 def setup_logging():
     """设置日志"""
@@ -33,15 +34,43 @@ def monitor_stocks():
         stock_fetcher = StockFetcher()
         notifier = WeChatNotifier()
         signal_detector = SignalDetector()
+        market_hours = MarketHours()
         
         # 获取需要监控的股票代码
-        stock_codes = stock_manager.get_active_stocks()
+        all_stock_codes = stock_manager.get_active_stocks()
         
-        if not stock_codes:
+        if not all_stock_codes:
             logger.warning("没有需要监控的股票代码")
             return
         
-        logger.info(f"🎯 开始监控 {len(stock_codes)} 只股票: {stock_codes}")
+        # 根据配置决定是否检查开市时间
+        if CHECK_MARKET_HOURS:
+            # 检查是否有任何市场开市
+            if not market_hours.should_send_notification(all_stock_codes):
+                # 获取市场状态信息
+                a_stock_status = market_hours.get_market_status_message('A股')
+                hk_stock_status = market_hours.get_market_status_message('港股')
+                logger.info(f"📊 市场状态检查: {a_stock_status}, {hk_stock_status}")
+                logger.info("🔕 所有相关市场均已休市，跳过本次监控")
+                return
+            
+            # 过滤出开市的股票代码
+            filtered_codes = market_hours.get_filtered_stock_codes(all_stock_codes)
+            stock_codes = []
+            for market, codes in filtered_codes.items():
+                if codes:
+                    logger.info(f"🟢 {market}开市中，监控 {len(codes)} 只股票: {codes}")
+                    stock_codes.extend(codes)
+            
+            if not stock_codes:
+                logger.info("📊 虽有股票代码，但相关市场均已休市，跳过本次监控")
+                return
+            
+            logger.info(f"🎯 开始监控 {len(stock_codes)} 只开市股票: {stock_codes}")
+        else:
+            # 不检查开市时间，监控所有股票
+            stock_codes = all_stock_codes
+            logger.info(f"🎯 开始监控 {len(stock_codes)} 只股票 (未启用开市时间检查): {stock_codes}")
         
         # 获取股票数据
         stock_data = stock_fetcher.get_stock_data(stock_codes)
@@ -295,6 +324,58 @@ def analyze_stock_command(code: str):
     except Exception as e:
         print(f"❌ 分析股票失败: {e}")
 
+def market_status_command():
+    """查看市场状态命令"""
+    print("📊 正在检查市场状态...")
+    
+    try:
+        market_hours = MarketHours()
+        
+        # 检查A股状态
+        a_stock_status = market_hours.get_market_status_message('A股')
+        print(f"\n{a_stock_status}")
+        
+        # 检查港股状态
+        hk_stock_status = market_hours.get_market_status_message('港股')
+        print(f"{hk_stock_status}")
+        
+        # 检查监控的股票
+        stock_manager = StockManager()
+        stock_codes = stock_manager.get_active_stocks()
+        
+        if stock_codes:
+            print(f"\n📋 当前监控的股票 ({len(stock_codes)} 只):")
+            
+            # 按市场分类显示
+            filtered_codes = market_hours.get_filtered_stock_codes(stock_codes)
+            
+            for market, codes in filtered_codes.items():
+                if codes:
+                    market_open = market_hours.is_market_open(market)
+                    status_icon = "🟢" if market_open else "🔴"
+                    print(f"  {status_icon} {market}: {len(codes)} 只股票 - {', '.join(codes)}")
+            
+            # 显示休市的股票
+            all_filtered = []
+            for codes in filtered_codes.values():
+                all_filtered.extend(codes)
+            
+            closed_stocks = [code for code in stock_codes if code not in all_filtered]
+            if closed_stocks:
+                print(f"  🔴 休市股票: {len(closed_stocks)} 只 - {', '.join(closed_stocks)}")
+            
+            # 总结
+            active_count = len(all_filtered)
+            if active_count > 0:
+                print(f"\n✅ 当前有 {active_count} 只股票的市场正在开市")
+            else:
+                print(f"\n🔕 当前所有监控股票的市场均已休市")
+        else:
+            print("\n📋 暂无监控的股票")
+        
+    except Exception as e:
+        print(f"❌ 检查市场状态失败: {e}")
+
 def start_scheduler():
     """启动定时任务"""
     logger = logging.getLogger(__name__)
@@ -353,6 +434,9 @@ def main():
     analyze_parser = subparsers.add_parser('analyze', help='分析单只股票')
     analyze_parser.add_argument('code', help='股票代码')
     
+    # 查看市场状态
+    subparsers.add_parser('status', help='查看市场开市状态')
+    
     args = parser.parse_args()
     
     if args.command == 'add':
@@ -373,6 +457,8 @@ def main():
         screen_stocks_command(args.market, args.top)
     elif args.command == 'analyze':
         analyze_stock_command(args.code)
+    elif args.command == 'status':
+        market_status_command()
     else:
         parser.print_help()
 
