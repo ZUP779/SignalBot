@@ -29,8 +29,29 @@ class WeChatNotifier:
             return False
         
         try:
-            message = self._format_stock_message(stock_data)
-            return self._send_message(message)
+            # 分离股票和指数数据
+            stocks_data = {}
+            indices_data = {}
+            
+            for code, data in stock_data.items():
+                if '指数' in data.get('market', ''):
+                    indices_data[code] = data
+                else:
+                    stocks_data[code] = data
+            
+            success = True
+            
+            # 发送股票数据
+            if stocks_data:
+                stock_message = self._format_stock_message(stocks_data)
+                success &= self._send_message(stock_message)
+            
+            # 发送指数数据
+            if indices_data:
+                index_message = self._format_index_message(indices_data)
+                success &= self._send_message(index_message)
+            
+            return success
             
         except Exception as e:
             self.logger.error(f"发送股票报告失败: {e}")
@@ -75,6 +96,49 @@ class WeChatNotifier:
                 
             except Exception as e:
                 self.logger.error(f"格式化股票 {code} 消息失败: {e}")
+                continue
+        
+        return "\n".join(message_lines)
+    
+    def _format_index_message(self, index_data: Dict[str, Dict]) -> str:
+        """格式化指数消息"""
+        now = datetime.now().strftime("%Y-%m-%d %H:%M")
+        message_lines = [f"📊 指数监控 - {now}\n"]
+        
+        for code, data in index_data.items():
+            try:
+                name = data['name']
+                current = data['current_price']
+                change = data['change']
+                change_percent = data['change_percent']
+                open_price = data['open_price']
+                high_price = data['high_price']
+                low_price = data['low_price']
+                currency = data['currency']
+                market = data['market']
+                
+                # 涨跌状态图标
+                if change > 0:
+                    status_icon = "🔴"
+                    change_icon = "↑"
+                elif change < 0:
+                    status_icon = "🟢"
+                    change_icon = "↓"
+                else:
+                    status_icon = "⚪"
+                    change_icon = "→"
+                
+                # 格式化消息
+                index_line = (
+                    f"{status_icon} {name}({code}) [{market}]\n"
+                    f"当前: {current:.2f}{currency} {change_icon}{change:+.2f}({change_percent:+.2f}%)\n"
+                    f"今日: 开盘{open_price:.2f} 最高{high_price:.2f} 最低{low_price:.2f}\n"
+                )
+                
+                message_lines.append(index_line)
+                
+            except Exception as e:
+                self.logger.error(f"格式化指数 {code} 消息失败: {e}")
                 continue
         
         return "\n".join(message_lines)

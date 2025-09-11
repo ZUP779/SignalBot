@@ -308,22 +308,56 @@ class MarketHours:
         return False
     
     def _is_a_stock_code(self, code: str) -> bool:
-        """判断是否为A股代码"""
-        # A股代码通常以 sh 或 sz 开头，或者是6位数字
+        """判断是否为A股代码（包括股票和指数）"""
+        # A股股票代码：以 sh 或 sz 开头，或者是6位数字
         if code.startswith(('sh', 'sz')):
             return True
         if len(code) == 6 and code.isdigit():
             return True
-        return False
+        
+        # A股指数代码：特定的指数代码
+        a_stock_indices = {
+            '000300.SS',  # 沪深300
+            '000905.SS',  # 中证500
+            '000016.SS',  # 上证50
+            # 简化格式
+            'sh000300',   # 沪深300
+            'sh000905',   # 中证500
+            'sh000016',   # 上证50
+        }
+        
+        return code in a_stock_indices
     
     def _is_hk_stock_code(self, code: str) -> bool:
-        """判断是否为港股代码"""
-        # 港股代码通常以 hk 开头，或者是5位数字
+        """判断是否为港股代码（包括股票和指数）"""
+        # 港股股票代码：以 hk 开头，或者是5位数字
         if code.startswith('hk'):
             return True
         if len(code) == 5 and code.isdigit():
             return True
-        return False
+        
+        # 港股指数代码：特定的指数代码
+        hk_indices = {
+            'HSI',        # 恒生指数
+            'hk.HSI',     # 恒生指数（带前缀）
+        }
+        
+        return code in hk_indices
+    
+    def _is_index_code(self, code: str) -> bool:
+        """判断是否为指数代码"""
+        # A股指数
+        a_stock_indices = {
+            '000300.SS', '000905.SS', '000016.SS',
+            'sh000300', 'sh000905', 'sh000016'
+        }
+        
+        # 港股指数
+        hk_indices = {
+            'HSI', 'hk.HSI'
+        }
+        
+        return code in a_stock_indices or code in hk_indices
     
     def get_filtered_stock_codes(self, stock_codes: List[str], check_time: datetime = None) -> Dict[str, List[str]]:
         """
@@ -338,13 +372,21 @@ class MarketHours:
         """
         result = {
             'A股': [],
-            '港股': []
+            '港股': [],
+            'A股指数': [],
+            '港股指数': []
         }
         
         for code in stock_codes:
             if self._is_a_stock_code(code) and self.is_market_open('A股', check_time):
-                result['A股'].append(code)
+                if self._is_index_code(code):
+                    result['A股指数'].append(code)
+                else:
+                    result['A股'].append(code)
             elif self._is_hk_stock_code(code) and self.is_market_open('港股', check_time):
-                result['港股'].append(code)
+                if self._is_index_code(code):
+                    result['港股指数'].append(code)
+                else:
+                    result['港股'].append(code)
         
         return result

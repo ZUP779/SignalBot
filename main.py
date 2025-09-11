@@ -10,6 +10,7 @@ from stock_manager import StockManager
 from signal_detector import SignalDetector
 from stock_screener import StockScreener, ScreenerCriteria
 from market_hours import MarketHours
+from process_manager import ProcessManager
 from config import LOG_LEVEL, LOG_FILE, UPDATE_INTERVAL_HOURS, ALWAYS_SEND_REPORT, SEND_SIGNAL_ALERTS, CHECK_MARKET_HOURS
 
 def setup_logging():
@@ -106,7 +107,16 @@ def monitor_stocks():
             success = notifier.send_stock_report(stock_data)
             report_sent = success
             if success:
-                logger.info(f"📊 发送常规监控报告: {len(stock_data)} 只股票")
+                # 统计股票和指数数量
+                stocks_count = sum(1 for data in stock_data.values() if '指数' not in data.get('market', ''))
+                indices_count = sum(1 for data in stock_data.values() if '指数' in data.get('market', ''))
+                
+                if stocks_count > 0 and indices_count > 0:
+                    logger.info(f"📊 发送监控报告: {stocks_count} 只股票, {indices_count} 个指数")
+                elif stocks_count > 0:
+                    logger.info(f"📊 发送股票监控报告: {stocks_count} 只股票")
+                elif indices_count > 0:
+                    logger.info(f"📊 发送指数监控报告: {indices_count} 个指数")
         
         # 如果检测到重要信号，发送信号预警
         if SEND_SIGNAL_ALERTS and signal_detector.should_notify(signals):
@@ -117,7 +127,9 @@ def monitor_stocks():
         
         # 如果既不发送常规报告，也没有信号，则记录日志
         if not ALWAYS_SEND_REPORT and not signal_detector.should_notify(signals):
-            logger.info(f"📊 监控完成，未检测到重要信号，未发送通知 ({len(stock_data)} 只股票)")
+            stocks_count = sum(1 for data in stock_data.values() if '指数' not in data.get('market', ''))
+            indices_count = sum(1 for data in stock_data.values() if '指数' in data.get('market', ''))
+            logger.info(f"📊 监控完成，未检测到重要信号，未发送通知 ({stocks_count} 只股票, {indices_count} 个指数)")
         elif report_sent or signal_detector.should_notify(signals):
             logger.info(f"✅ SignalBot 任务完成")
         else:
@@ -126,7 +138,7 @@ def monitor_stocks():
     except Exception as e:
         logger.error(f"SignalBot 监控任务执行失败: {e}")
 
-def add_stock_command(code: str, name: str = ""):
+def add_stock_command(code: str, name: str = "", auto_restart: bool = True):
     """添加股票命令"""
     print(f"🔍 正在添加股票: {code}")
     if not name:
@@ -144,15 +156,23 @@ def add_stock_command(code: str, name: str = ""):
             print(f"✅ 成功添加股票: {code} {display_name} [{added_stock['market']}]")
         else:
             print(f"✅ 成功添加股票: {code}")
+        
+        # 自动重启监控进程
+        if auto_restart:
+            _auto_restart_if_running()
     else:
         print(f"❌ 添加股票失败: {code}")
 
-def remove_stock_command(code: str):
+def remove_stock_command(code: str, auto_restart: bool = True):
     """移除股票命令"""
     manager = StockManager()
     success = manager.remove_stock(code)
     if success:
         print(f"✅ 成功移除股票: {code}")
+        
+        # 自动重启监控进程
+        if auto_restart:
+            _auto_restart_if_running()
     else:
         print(f"❌ 移除股票失败: {code}")
 
@@ -344,16 +364,23 @@ def market_status_command():
         stock_codes = stock_manager.get_active_stocks()
         
         if stock_codes:
-            print(f"\n📋 当前监控的股票 ({len(stock_codes)} 只):")
+            print(f"\n📋 当前监控的股票/指数 ({len(stock_codes)} 只):")
             
             # 按市场分类显示
             filtered_codes = market_hours.get_filtered_stock_codes(stock_codes)
             
             for market, codes in filtered_codes.items():
                 if codes:
-                    market_open = market_hours.is_market_open(market)
+                    # 指数跟随对应市场的开市时间
+                    if market == 'A股指数':
+                        market_open = market_hours.is_market_open('A股')
+                    elif market == '港股指数':
+                        market_open = market_hours.is_market_open('港股')
+                    else:
+                        market_open = market_hours.is_market_open(market)
+                    
                     status_icon = "🟢" if market_open else "🔴"
-                    print(f"  {status_icon} {market}: {len(codes)} 只股票 - {', '.join(codes)}")
+                    print(f"  {status_icon} {market}: {len(codes)} 只 - {', '.join(codes)}")
             
             # 显示休市的股票
             all_filtered = []
@@ -362,19 +389,138 @@ def market_status_command():
             
             closed_stocks = [code for code in stock_codes if code not in all_filtered]
             if closed_stocks:
-                print(f"  🔴 休市股票: {len(closed_stocks)} 只 - {', '.join(closed_stocks)}")
+                print(f"  🔴 休市: {len(closed_stocks)} 只 - {', '.join(closed_stocks)}")
             
             # 总结
             active_count = len(all_filtered)
             if active_count > 0:
-                print(f"\n✅ 当前有 {active_count} 只股票的市场正在开市")
+                print(f"\n✅ 当前有 {active_count} 只股票/指数的市场正在开市")
             else:
-                print(f"\n🔕 当前所有监控股票的市场均已休市")
+                print(f"\n🔕 当前所有监控股票/指数的市场均已休市")
         else:
-            print("\n📋 暂无监控的股票")
+            print("\n📋 暂无监控的股票/指数")
         
     except Exception as e:
         print(f"❌ 检查市场状态失败: {e}")
+
+def add_indices_command():
+    """批量添加主要指数命令"""
+    print("📈 正在添加主要指数...")
+    
+    # 定义主要指数
+    major_indices = [
+        # A股指数
+        ('sh000300', '沪深300'),
+        ('sh000905', '中证500'),
+        ('sh000016', '上证50'),
+        
+        # 港股指数
+        ('HSI', '恒生指数'),
+    ]
+    
+    manager = StockManager()
+    added_count = 0
+    
+    print(f"\n📊 准备添加 {len(major_indices)} 个主要指数:")
+    
+    for code, name in major_indices:
+        print(f"🔍 正在添加: {code} {name}")
+        success = manager.add_stock(code, name)
+        
+        if success:
+            print(f"✅ 成功添加: {code} {name}")
+            added_count += 1
+        else:
+            print(f"⚠️  跳过 (可能已存在): {code} {name}")
+    
+    print(f"\n🎉 完成！成功添加了 {added_count} 个指数到监控列表")
+    
+    if added_count > 0:
+        print("\n💡 提示: 使用 'python main.py list' 查看完整监控列表")
+        print("💡 提示: 使用 'python main.py run' 立即获取指数数据")
+        
+        # 自动重启监控进程
+        _auto_restart_if_running()
+
+def list_available_indices_command():
+    """列出可用的指数代码"""
+    print("📊 可监控的指数列表:\n")
+    
+    print("🇨🇳 A股主要指数:")
+    a_indices = [
+        ('sh000300', '沪深300', '反映A股市场整体走势的核心指数'),
+        ('sh000905', '中证500', '反映A股市场中小盘股票的整体表现'),
+        ('sh000016', '上证50', '反映上海证券市场最具代表性的50只股票'),
+    ]
+    
+    for code, name, desc in a_indices:
+        print(f"  📈 {code:<12} {name:<8} - {desc}")
+    
+    print("\n🇭🇰 港股主要指数:")
+    hk_indices = [
+        ('HSI', '恒生指数', '香港股市最重要的指标，反映港股整体表现'),
+    ]
+    
+    for code, name, desc in hk_indices:
+        print(f"  📈 {code:<12} {name:<8} - {desc}")
+    
+    print(f"\n💡 使用方法:")
+    print(f"  • 添加单个指数: python main.py add sh000300 --name '沪深300'")
+    print(f"  • 批量添加主要指数: python main.py add-indices")
+    print(f"  • 查看当前监控: python main.py list")
+    print(f"\n⚠️  投资提示:")
+    print(f"  • 指数反映市场整体趋势，适合了解大盘走向")
+    print(f"  • 沪深300覆盖大盘蓝筹，中证500代表中盘成长，上证50聚焦超大盘")
+    print(f"  • 恒生指数是港股市场的重要风向标")
+    print(f"  • 指数分离推送，便于区分个股和大盘走势")
+
+def _auto_restart_if_running():
+    """如果监控进程正在运行，自动重启它"""
+    process_manager = ProcessManager()
+    
+    if process_manager.is_running():
+        print("\n🔄 检测到监控进程正在运行，自动重启以应用更改...")
+        if process_manager.restart_daemon():
+            print("✅ 监控进程已自动重启")
+        else:
+            print("❌ 自动重启失败，请手动重启: python main.py restart")
+    else:
+        print("\n💡 提示: 使用 'python main.py daemon' 启动后台监控")
+
+def daemon_start_command():
+    """启动守护进程命令"""
+    process_manager = ProcessManager()
+    process_manager.start_daemon()
+
+def daemon_stop_command():
+    """停止守护进程命令"""
+    process_manager = ProcessManager()
+    process_manager.stop_daemon()
+
+def daemon_restart_command():
+    """重启守护进程命令"""
+    process_manager = ProcessManager()
+    process_manager.restart_daemon()
+
+def daemon_status_command():
+    """查看守护进程状态命令"""
+    process_manager = ProcessManager()
+    process_manager.show_status()
+
+def daemon_logs_command(lines: int = 20):
+    """查看守护进程日志命令"""
+    process_manager = ProcessManager()
+    process_manager.show_logs(lines)
+
+def daemon_monitor_command():
+    """启动自动重启监控命令"""
+    process_manager = ProcessManager()
+    process_manager.auto_restart_on_change()
+
+def daemon_cleanup_command():
+    """清理守护进程残留文件命令"""
+    process_manager = ProcessManager()
+    process_manager.cleanup()
 
 def start_scheduler():
     """启动定时任务"""
@@ -437,6 +583,26 @@ def main():
     # 查看市场状态
     subparsers.add_parser('status', help='查看市场开市状态')
     
+    # 批量添加指数
+    subparsers.add_parser('add-indices', help='批量添加主要指数')
+    
+    # 列出可用指数
+    subparsers.add_parser('list-indices', help='列出可监控的指数')
+    
+    # 守护进程管理
+    subparsers.add_parser('daemon', help='启动后台守护进程')
+    subparsers.add_parser('stop', help='停止后台守护进程')
+    subparsers.add_parser('restart', help='重启后台守护进程')
+    subparsers.add_parser('ps', help='查看守护进程状态')
+    
+    # 日志管理
+    logs_parser = subparsers.add_parser('logs', help='查看守护进程日志')
+    logs_parser.add_argument('--lines', type=int, default=20, help='显示行数')
+    
+    # 自动监控
+    subparsers.add_parser('monitor', help='启动自动重启监控')
+    subparsers.add_parser('cleanup', help='清理守护进程残留文件')
+    
     args = parser.parse_args()
     
     if args.command == 'add':
@@ -459,6 +625,24 @@ def main():
         analyze_stock_command(args.code)
     elif args.command == 'status':
         market_status_command()
+    elif args.command == 'add-indices':
+        add_indices_command()
+    elif args.command == 'list-indices':
+        list_available_indices_command()
+    elif args.command == 'daemon':
+        daemon_start_command()
+    elif args.command == 'stop':
+        daemon_stop_command()
+    elif args.command == 'restart':
+        daemon_restart_command()
+    elif args.command == 'ps':
+        daemon_status_command()
+    elif args.command == 'logs':
+        daemon_logs_command(args.lines)
+    elif args.command == 'monitor':
+        daemon_monitor_command()
+    elif args.command == 'cleanup':
+        daemon_cleanup_command()
     else:
         parser.print_help()
 

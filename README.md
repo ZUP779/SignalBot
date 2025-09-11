@@ -6,8 +6,11 @@
 
 - 🤖 **智能信号发现** - 自动检测价格异动、涨跌幅变化
 - 📡 **多渠道推送** - 企业微信机器人实时通知
-- 🎯 **精准监控** - 支持A股和港股实时数据
+- 🎯 **精准监控** - 支持A股、港股股票及主要指数实时数据
 - 📊 **历史追踪** - SQLite存储价格历史和信号记录
+- 📈 **指数监控** - 支持沪深300、中证500、上证50、恒生指数等核心指数
+- 🔀 **分离推送** - 股票和指数分别推送，信息更清晰
+- 🤖 **自动化管理** - 守护进程 + 自动重启，无需手动干预
 - ⚙️ **灵活配置** - 动态管理监控标的和推送策略
 - 🔍 **异常发现** - 智能识别价格突变和交易异常
 
@@ -41,6 +44,13 @@ python main.py add 600036 --name "招商银行"
 # 添加港股
 python main.py add 00700 --name "腾讯控股"
 python main.py add 09988 --name "阿里巴巴-W"
+
+# 批量添加主要指数
+python main.py add-indices
+
+# 或手动添加指数
+python main.py add sh000300 --name "沪深300"
+python main.py add HSI --name "恒生指数"
 ```
 
 ### 4. 测试 SignalBot
@@ -58,28 +68,78 @@ python main.py list
 
 ### 5. 启动智能监控
 
+**方式一：后台守护进程（推荐）**
+```bash
+# 启动后台监控
+python main.py daemon
+
+# 查看运行状态
+python main.py ps
+
+# 查看日志
+python main.py logs
+```
+
+**方式二：前台监控**
 ```bash
 python main.py start
 ```
 
+**自动重启监控（可选）**
+```bash
+# 启动自动重启监控，当股票列表变化时自动重启
+python main.py monitor
+```
+
 SignalBot 会智能检测价格异动、成交量异常等信号，只在发现重要信号时才推送通知，避免信息过载。
+
+## 🔄 自动化特性
+
+- **自动重启**: 添加/删除股票后自动重启监控进程
+- **守护进程**: 后台运行，不占用终端
+- **进程监控**: 实时查看运行状态和资源使用
+- **日志管理**: 完整的运行日志记录
 
 ## 命令说明
 
 | 命令 | 说明 | 示例 |
 |------|------|------|
-| `add` | 添加股票代码 | `python main.py add 000001 --name "平安银行"` |
-| `remove` | 移除股票代码 | `python main.py remove 000001` |
-| `list` | 列出所有股票 | `python main.py list` |
+| `add` | 添加股票/指数代码 | `python main.py add 000001 --name "平安银行"` |
+| `remove` | 移除股票/指数代码 | `python main.py remove 000001` |
+| `list` | 列出所有股票/指数 | `python main.py list` |
+| `add-indices` | 批量添加主要指数 | `python main.py add-indices` |
+| `list-indices` | 列出可监控的指数 | `python main.py list-indices` |
 | `status` | 查看市场开市状态 | `python main.py status` |
 | `test` | 测试企业微信通知 | `python main.py test` |
 | `run` | 立即执行监控 | `python main.py run` |
 | `start` | 启动定时监控 | `python main.py start` |
 
-## 股票代码格式
+## 🤖 守护进程管理
 
+| 命令 | 说明 | 示例 |
+|------|------|------|
+| `daemon` | 启动后台守护进程 | `python main.py daemon` |
+| `stop` | 停止后台守护进程 | `python main.py stop` |
+| `restart` | 重启后台守护进程 | `python main.py restart` |
+| `ps` | 查看守护进程状态 | `python main.py ps` |
+| `logs` | 查看守护进程日志 | `python main.py logs --lines 50` |
+| `monitor` | 启动自动重启监控 | `python main.py monitor` |
+| `cleanup` | 清理守护进程残留文件 | `python main.py cleanup` |
+
+## 股票/指数代码格式
+
+### 股票代码
 - **A股**: 6位数字，如 `000001`、`600036`
 - **港股**: 5位数字，如 `00700`、`01810`
+
+### 指数代码
+- **A股指数**: 
+  - `sh000300` - 沪深300 (反映A股市场整体走势的核心指数)
+  - `sh000905` - 中证500 (反映A股市场中小盘股票的整体表现)
+  - `sh000016` - 上证50 (反映上海证券市场最具代表性的50只股票)
+
+- **港股指数**:
+  - `HSI` - 恒生指数 (香港股市最重要的指标，反映港股整体表现)
 
 ## 📡 数据源与接口
 
@@ -129,6 +189,7 @@ SignalBot 会智能检测价格异动、成交量异常等信号，只在发现�
 - 支持信号级别分类（高/中/低）
 - 可配置推送阈值和条件
 - **开市时间智能检查** - 自动识别A股和港股开市时间，只在开市期间推送消息
+- **分离推送** - 股票和指数分别推送，便于区分关注重点
 
 ### 🕐 开市时间管理
 - **A股交易时间**: 周一至周五 09:30-11:30, 13:00-15:00 (北京时间)
